@@ -1,0 +1,141 @@
+{
+  "info": {
+    "_postman_id": "bc4b293f-cc4f-4f37-94f1-014eeb0c815b",
+    "name": "Checkout API",
+    "description": "HTTP requests for the in-memory checkout service. Start the API locally before sending requests. The Create cart request saves its cart ID for later requests.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000"
+    },
+    {
+      "key": "cartId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "List products",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/products"
+      }
+    },
+    {
+      "name": "Create cart",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Cart created', function () {",
+              "    pm.response.to.have.status(201);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.cart_id).to.be.a('string');",
+              "    pm.collectionVariables.set('cartId', body.cart_id);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/carts"
+      }
+    },
+    {
+      "name": "Add coffee to cart",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"product_id\": \"coffee\",\n  \"quantity\": 2\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/carts/{{cartId}}/items"
+      }
+    },
+    {
+      "name": "Apply SAVE10 discount",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"code\": \"SAVE10\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/carts/{{cartId}}/discounts"
+      }
+    },
+    {
+      "name": "View cart",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/carts/{{cartId}}"
+      }
+    },
+    {
+      "name": "Check coffee stock",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/products/coffee/stock"
+      }
+    },
+    {
+      "name": "Checkout cart",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/carts/{{cartId}}/checkout"
+      }
+    },
+    {
+      "name": "Optional cart operations",
+      "item": [
+        {
+          "name": "Remove coffee from cart",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/carts/{{cartId}}/items/coffee"
+          }
+        },
+        {
+          "name": "Clear cart",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/carts/{{cartId}}"
+          }
+        }
+      ]
+    }
+  ]
+}

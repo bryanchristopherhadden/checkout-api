@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package checkout.v1;
+
+service CheckoutCommands {
+  rpc CreateCart(CreateCartRequest) returns (CartResponse);
+  rpc AddToCart(AddToCartRequest) returns (CartResponse);
+  rpc RemoveFromCart(RemoveFromCartRequest) returns (CartResponse);
+  rpc ClearCart(CartRequest) returns (CartResponse);
+  rpc ApplyDiscount(ApplyDiscountRequest) returns (CartResponse);
+  rpc CheckoutCart(CartRequest) returns (CheckoutResponse);
+  rpc CheckStock(CheckStockRequest) returns (CheckStockResponse);
+}
+
+message CreateCartRequest {}
+
+message CartRequest {
+  string cart_id = 1;
+}
+
+message AddToCartRequest {
+  string cart_id = 1;
+  string product_id = 2;
+  int32 quantity = 3;
+}
+
+message RemoveFromCartRequest {
+  string cart_id = 1;
+  string product_id = 2;
+}
+
+message ApplyDiscountRequest {
+  string cart_id = 1;
+  string code = 2;
+}
+
+message CheckStockRequest {
+  string product_id = 1;
+}
+
+message CartLine {
+  string product_id = 1;
+  string name = 2;
+  int32 unit_price_cents = 3;
+  int32 quantity = 4;
+  int32 line_total_cents = 5;
+}
+
+message CartResponse {
+  string cart_id = 1;
+  repeated CartLine items = 2;
+  string discount_code = 3;
+  int32 subtotal_cents = 4;
+  int32 discount_cents = 5;
+  int32 total_cents = 6;
+}
+
+message CheckoutResponse {
+  string order_id = 1;
+  string cart_id = 2;
+  string currency = 3;
+  repeated CartLine items = 4;
+  int32 subtotal_cents = 5;
+  string discount_code = 6;
+  int32 discount_cents = 7;
+  int32 total_cents = 8;
+}
+
+message CheckStockResponse {
+  string product_id = 1;
+  int32 available_quantity = 2;
+}
