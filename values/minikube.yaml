@@ -1,0 +1,9 @@
+# Local minikube overrides. The image is loaded with `minikube image load`,
+# so it never needs to be pulled from a registry.
+replicaCount: 1
+
+image:
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP

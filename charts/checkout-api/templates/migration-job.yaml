@@ -1,0 +1,83 @@
+{{- if .Values.migrations.enabled }}
+# Runs `alembic upgrade head` after install/upgrade. It waits for PostgreSQL
+# to accept connections first, because the Postgres Deployment is created in
+# the same release.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "checkout-api.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "checkout-api.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "checkout-api.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: wait-for-db
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: DB_HOST
+              value: {{ include "checkout-api.dbHost" . | quote }}
+            - name: DB_PORT
+              value: {{ .Values.database.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.postgres.database | quote }}
+            - name: DB_USER
+              value: {{ .Values.postgres.username | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "checkout-api.dbSecretName" . }}
+                  key: password
+          command:
+            - python
+            - -c
+            - |
+              import os, sys, time, psycopg
+              for attempt in range(60):
+                  try:
+                      psycopg.connect(
+                          host=os.environ["DB_HOST"],
+                          port=os.environ["DB_PORT"],
+                          dbname=os.environ["DB_NAME"],
+                          user=os.environ["DB_USER"],
+                          password=os.environ["DB_PASSWORD"],
+                          connect_timeout=2,
+                      ).close()
+                      print("database is ready", flush=True)
+                      sys.exit(0)
+                  except psycopg.OperationalError as error:
+                      print(f"waiting for database ({attempt + 1}/60): {error}", flush=True)
+                      time.sleep(2)
+              sys.exit("database never became ready")
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "checkout-api.dbSecretName" . }}
+                  key: password
+            - name: DATABASE_URL
+              value: {{ include "checkout-api.databaseUrl" . | quote }}
+          command: ["alembic", "upgrade", "head"]
+{{- end }}
