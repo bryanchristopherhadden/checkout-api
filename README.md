@@ -51,17 +51,24 @@ it with `source .venv/bin/activate`. Activate it again whenever you open a new
 terminal before running the API.
 
 After the one-time setup above, start the API from the project directory with
-this single command (it activates the virtual environment, loads `.env`, applies
-pending migrations, and starts the server):
+this single command (it activates the virtual environment, loads `.env` if
+present, applies pending migrations, and starts the server):
 
 ```sh
-source .venv/bin/activate && set -a && source .env && set +a && alembic upgrade head && uvicorn app:app --reload
+source .venv/bin/activate && if [ -f .env ]; then set -a && source .env && set +a; fi && alembic upgrade head && uvicorn app:app --reload
 ```
 
+The app defaults to the local development database URL in
+`.env.example`, so `.env` is optional for the default local setup. Copy
+`.env.example` to `.env` if you want to configure the database URL or gRPC
+port.
+
 The Compose setup uses a local development database (`checkout` / `checkout`);
-do not use these credentials outside local development. If PostgreSQL is installed another way, start it with your platform's service
-manager and set `DATABASE_URL` in `.env` to the database URL. The database
-migration command creates the schema and demo products. Inventory is
+do not use these credentials outside local development. `.env.example` contains
+fake local-development credentials; copy it to `.env` and adjust the URL if
+needed. If PostgreSQL is installed another way, start it with your platform's
+service manager and set `DATABASE_URL` in `.env` to the database URL. The
+database migration command creates the schema and demo products. Inventory is
 decremented at checkout; adding an item to a cart does not reserve stock.
 
 The API is available at `http://127.0.0.1:8000`; open
