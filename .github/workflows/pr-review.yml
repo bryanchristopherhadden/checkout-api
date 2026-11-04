@@ -1,0 +1,43 @@
+# Copy to checkout-api/.github/workflows/pr-review.yml on the default branch.
+# Needs the repo secret ANTHROPIC_API_KEY (Settings > Secrets and variables > Actions).
+name: PR review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+  pull_request_review_thread:
+    types: [resolved]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the reviewer
+        uses: actions/checkout@v4
+        with:
+          repository: bryanchristopherhadden/pr-reviewer
+          path: reviewer
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install reviewer dependencies
+        run: python -m pip install -r reviewer/requirements.txt
+
+      - name: Review open PRs into main
+        run: python reviewer/run.py --github "${{ github.repository }}" --once
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          BOT_LOGIN: github-actions[bot]
