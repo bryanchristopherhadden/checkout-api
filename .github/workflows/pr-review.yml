@@ -6,8 +6,6 @@ on:
   pull_request:
     branches: [main]
     types: [opened, reopened, synchronize]
-  pull_request_review_thread:
-    types: [resolved]
   workflow_dispatch:
 
 permissions:
