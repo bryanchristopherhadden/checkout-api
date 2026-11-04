@@ -94,6 +94,7 @@ def _raise_http_error(error: CommerceError) -> NoReturn:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    commerce.verify_database()
     server, port = start_grpc_server(
         commerce, int(os.environ.get("CHECKOUT_GRPC_PORT", "50051"))
     )

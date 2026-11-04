@@ -10,20 +10,39 @@ It gives reviewers, recruiters, and hiring engineers a concrete example to
 explore, run, and assess—including its API design, shared service layer,
 validation, tests, and generated gRPC bindings.
 
-The implementation is intentionally small and in-memory: it is a
-demonstration project, not a production-ready commerce system. Cart and stock
-state reset when the service restarts; it does not persist orders or process
-payments.
+The service stores carts, orders, and inventory in PostgreSQL. It is still a
+small demonstration project, not a complete production commerce system; it
+does not process payments or provide user authentication.
 
-## Start the API
+## Start PostgreSQL and the API
 
-Run these commands from the project directory. The virtual environment keeps
-Python packages separate from macOS's system-managed Python:
+Start a local PostgreSQL database with Docker Compose:
+
+```sh
+docker compose up -d postgres
+```
+
+On macOS without Docker, PostgreSQL can instead be installed and started with
+Homebrew:
+
+```sh
+brew install postgresql@17
+brew services start postgresql@17
+psql -d postgres -c "CREATE ROLE checkout LOGIN PASSWORD 'checkout'"
+psql -d postgres -c "CREATE DATABASE checkout OWNER checkout"
+```
+
+Set up the Python environment and configure the database connection:
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
+cp .env.example .env
+set -a
+source .env
+set +a
+alembic upgrade head
 uvicorn app:app --reload
 ```
 
@@ -31,10 +50,23 @@ If you already created `.venv`, skip the `venv` creation command and activate
 it with `source .venv/bin/activate`. Activate it again whenever you open a new
 terminal before running the API.
 
+After the one-time setup above, start the API from the project directory with
+this single command (it activates the virtual environment, loads `.env`, applies
+pending migrations, and starts the server):
+
+```sh
+source .venv/bin/activate && set -a && source .env && set +a && alembic upgrade head && uvicorn app:app --reload
+```
+
+The Compose setup uses a local development database (`checkout` / `checkout`);
+do not use these credentials outside local development. If PostgreSQL is installed another way, start it with your platform's service
+manager and set `DATABASE_URL` in `.env` to the database URL. The database
+migration command creates the schema and demo products. Inventory is
+decremented at checkout; adding an item to a cart does not reserve stock.
+
 The API is available at `http://127.0.0.1:8000`; open
-`http://127.0.0.1:8000/docs` for interactive API documentation. The FastAPI
-process also starts the gRPC service on port `50051`. Set `CHECKOUT_GRPC_PORT`
-to choose another port (or `0` to let the OS choose one).
+`http://127.0.0.1:8000/docs` for interactive API documentation. The API also
+starts gRPC on port `50051`. Set `CHECKOUT_GRPC_PORT` to choose another port.
 
 ## Postman
 
@@ -70,7 +102,8 @@ python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. checkout.prot
 
 The `CheckoutCommands` service in [`checkout.proto`](./checkout.proto) supports
 `CreateCart`, `AddToCart`, `RemoveFromCart`, `ClearCart`, `ApplyDiscount`,
-`CheckoutCart`, and `CheckStock`. Both transports use the same in-process cart
-and inventory state.
+`CheckoutCart`, and `CheckStock`. Both transports use the same PostgreSQL-backed
+cart and inventory state.
 
-Run the tests with `pytest`.
+Run the tests with `pytest`. Tests use isolated SQLite databases; the
+application itself defaults to PostgreSQL using `DATABASE_URL`.

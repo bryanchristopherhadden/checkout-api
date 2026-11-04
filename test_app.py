@@ -1,7 +1,11 @@
+from collections.abc import Iterator
+from pathlib import Path
+
 import grpc
 import pytest
 from fastapi.testclient import TestClient
 
+import app as app_module
 from app import app
 from checkout_pb2 import (
     AddToCartRequest,
@@ -12,14 +16,18 @@ from checkout_pb2 import (
     RemoveFromCartRequest,
 )
 from checkout_pb2_grpc import CheckoutCommandsStub
-from commerce import commerce
+from commerce import CommerceService
 
 client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def reset_commerce() -> None:
-    commerce.reset()
+def isolated_commerce(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    service = CommerceService("sqlite+pysqlite:///:memory:")
+    service.initialize_for_tests()
+    monkeypatch.setattr(app_module, "commerce", service)
+    yield
+    service.engine.dispose()
 
 
 def test_health_check() -> None:
@@ -111,6 +119,42 @@ def test_cart_rejects_unknown_discounts_and_insufficient_stock() -> None:
         json={"product_id": "mug", "quantity": 6},
     )
     assert too_many.status_code == 409
+
+
+def test_checkout_rolls_back_stock_and_keeps_cart_when_stock_changes() -> None:
+    first_cart = client.post("/carts").json()["cart_id"]
+    second_cart = client.post("/carts").json()["cart_id"]
+    client.post(
+        f"/carts/{first_cart}/items",
+        json={"product_id": "coffee", "quantity": 2},
+    )
+    client.post(
+        f"/carts/{second_cart}/items",
+        json={"product_id": "coffee", "quantity": 9},
+    )
+    assert client.post(f"/carts/{second_cart}/checkout").status_code == 200
+
+    failed_checkout = client.post(f"/carts/{first_cart}/checkout")
+    assert failed_checkout.status_code == 409
+    assert client.get("/products/coffee/stock").json()["available_quantity"] == 1
+    assert len(client.get(f"/carts/{first_cart}").json()["items"]) == 1
+
+
+def test_cart_data_persists_across_service_instances(tmp_path: Path) -> None:
+    database_path = tmp_path / "persistent.sqlite3"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    first_service = CommerceService(database_url)
+    first_service.initialize_for_tests()
+    cart = first_service.create_cart()
+    first_service.add_item(cart.cart_id, "coffee", 2)
+
+    second_service = CommerceService(database_url)
+    second_service.initialize_for_tests()
+    persisted_cart = second_service.get_cart(cart.cart_id)
+
+    assert persisted_cart.items[0].quantity == 2
+    first_service.engine.dispose()
+    second_service.engine.dispose()
 
 
 def test_grpc_commands_use_the_same_cart_and_stock(
