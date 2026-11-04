@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -30,11 +31,40 @@ def isolated_commerce(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     service.engine.dispose()
 
 
-def test_health_check() -> None:
+def test_health_check_has_request_id_and_logs_request(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="checkout_api.request")
     response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    request_id = response.headers["x-request-id"]
+    assert len(request_id) == 36
+    assert any(
+        record.request_id == request_id
+        and record.method == "GET"
+        and record.path == "/health"
+        and record.status_code == 200
+        and record.duration_ms >= 0
+        for record in caplog.records
+        if record.name == "checkout_api.request"
+    )
+
+
+def test_request_middleware_logs_error_responses(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="checkout_api.request")
+    response = client.get("/missing-route")
+
+    assert response.status_code == 404
+    request_id = response.headers["x-request-id"]
+    assert any(
+        record.request_id == request_id and record.status_code == 404
+        for record in caplog.records
+        if record.name == "checkout_api.request"
+    )
 
 
 def test_list_products() -> None:

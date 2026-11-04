@@ -1,11 +1,15 @@
+import logging
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+from time import perf_counter
 from typing import NoReturn
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from commerce import (
     Cart,
@@ -18,6 +22,57 @@ from commerce import (
     commerce,
 )
 from grpc_service import start_grpc_server
+
+request_logger = logging.getLogger("checkout_api.request")
+
+
+class RequestLoggingMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request_id = str(uuid4())
+        scope.setdefault("state", {})["request_id"] = request_id
+        started_at = perf_counter()
+        status_code: int | None = None
+        error: Exception | None = None
+
+        async def send_with_request_id(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+                headers = list(message.get("headers", []))
+                headers.append((b"x-request-id", request_id.encode("ascii")))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_request_id)
+        except Exception as caught_error:
+            error = caught_error
+            raise
+        finally:
+            log_fields = {
+                "request_id": request_id,
+                "method": scope["method"],
+                "path": scope["path"],
+                "status_code": status_code or 500,
+                "duration_ms": round((perf_counter() - started_at) * 1000, 2),
+            }
+            if error is not None:
+                request_logger.error(
+                    "HTTP request failed",
+                    exc_info=(type(error), error, error.__traceback__),
+                    extra=log_fields,
+                )
+            else:
+                request_logger.info("HTTP request completed", extra=log_fields)
 
 
 class CartItemRequest(BaseModel):
@@ -107,6 +162,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="Checkout API", version="0.2.0", lifespan=lifespan)
+app.add_middleware(RequestLoggingMiddleware)
 
 
 @app.get("/health")

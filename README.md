@@ -91,6 +91,9 @@ python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. checkout.prot
 
 ## HTTP API
 
+- HTTP responses include an `X-Request-ID` header. Request logs include that
+  ID, method, path, status, and request duration; use the ID to correlate a
+  client response with server logs.
 - `GET /health` checks that the service is running.
 - `GET /products` lists the demo catalog. Prices are integer cents.
 - `GET /products/{product_id}/stock` checks available inventory.
@@ -111,6 +114,16 @@ The `CheckoutCommands` service in [`checkout.proto`](./checkout.proto) supports
 `CreateCart`, `AddToCart`, `RemoveFromCart`, `ClearCart`, `ApplyDiscount`,
 `CheckoutCart`, and `CheckStock`. Both transports use the same PostgreSQL-backed
 cart and inventory state.
+
+## Continuous integration
+
+GitHub Actions runs on pushes to `main` and on pull requests targeting `main`.
+The workflow tests Python 3.12, 3.13, and 3.14, starts PostgreSQL 17, applies
+database migrations, and runs the test suite. Results appear in each pull
+request's **Checks** tab and as a status check on the commit.
+
+Automatic deployment (CD) is not configured; it requires selecting a hosting
+provider and adding its deployment settings and secrets.
 
 Run the tests with `pytest`. Tests use isolated SQLite databases; the
 application itself defaults to PostgreSQL using `DATABASE_URL`.
