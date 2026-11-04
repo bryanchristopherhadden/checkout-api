@@ -21,6 +21,8 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
+    # ANTHROPIC_API_KEY is stored on the "default" environment, so the job must opt in to it.
+    environment: default
     steps:
       - name: Check out the reviewer
         uses: actions/checkout@v4
