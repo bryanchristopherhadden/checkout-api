@@ -1,0 +1,57 @@
+# Default values. Environment-specific overrides live in ../../values/*.yaml.
+
+image:
+  repository: checkout-api
+  tag: dev
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  httpPort: 8000
+  grpcPort: 50051
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# Built-in PostgreSQL for local clusters. Set enabled: false and provide
+# database.existingSecret / database.host when using RDS on EKS.
+postgres:
+  enabled: true
+  image: postgres:17-alpine
+  database: checkout
+  username: checkout
+  storage: 1Gi
+  # Use an emptyDir (data lost on pod restart) when true. Fine for local dev.
+  ephemeral: true
+
+database:
+  # Used only when postgres.enabled is false.
+  host: ""
+  port: 5432
+  # Name of an existing Secret with key "password". Used when set.
+  existingSecret: ""
+  # Dev-only plaintext password. Ignored when existingSecret is set.
+  password: checkout
+
+migrations:
+  enabled: true
+  backoffLimit: 3
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]

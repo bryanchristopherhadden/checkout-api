@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+.git/
+.github/
+.vscode/
+postman/
+.DS_Store
+Dockerfile
+.dockerignore

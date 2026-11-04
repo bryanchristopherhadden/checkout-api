@@ -29,11 +29,21 @@ products = Table(
     CheckConstraint("available_quantity >= 0", name="ck_products_stock_nonnegative"),
 )
 
+gift_cards = Table(
+    "gift_cards",
+    metadata,
+    Column("gift_card_id", String(36), primary_key=True),
+    Column("balance_cents", Integer, nullable=False),
+    Column("currency", String(3), nullable=False),
+    CheckConstraint("balance_cents >= 0", name="ck_gift_cards_balance_nonnegative"),
+)
+
 carts = Table(
     "carts",
     metadata,
     Column("cart_id", String(36), primary_key=True),
     Column("discount_code", String(50)),
+    Column("gift_card_id", String(36), ForeignKey("gift_cards.gift_card_id")),
 )
 
 cart_items = Table(
@@ -65,6 +75,9 @@ orders = Table(
     Column("discount_code", String(50)),
     Column("discount_cents", Integer, nullable=False),
     Column("total_cents", Integer, nullable=False),
+    Column("gift_card_id", String(36), ForeignKey("gift_cards.gift_card_id")),
+    Column("gift_card_applied_cents", Integer, nullable=False, server_default="0"),
+    Column("amount_due_cents", Integer, nullable=False, server_default="0"),
 )
 
 order_items = Table(

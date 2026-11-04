@@ -136,6 +136,112 @@ def test_cart_lifecycle_applies_discount_and_updates_stock() -> None:
     assert client.get(f"/carts/{cart_id}").json()["items"] == []
 
 
+def test_gift_card_is_created_applied_and_redeemed_at_checkout() -> None:
+    gift_card_response = client.post(
+        "/gift-cards", json={"balance_cents": 700}
+    )
+    assert gift_card_response.status_code == 201
+    gift_card = gift_card_response.json()
+    gift_card_id = gift_card["gift_card_id"]
+    assert gift_card["balance_cents"] == 700
+    assert gift_card["currency"] == "USD"
+
+    assert client.get(f"/gift-cards/{gift_card_id}").json()["balance_cents"] == 700
+    cart_id = client.post("/carts").json()["cart_id"]
+    client.post(
+        f"/carts/{cart_id}/items",
+        json={"product_id": "coffee", "quantity": 2},
+    )
+    client.post(
+        f"/carts/{cart_id}/discounts", json={"code": "SAVE10"}
+    )
+    applied = client.post(
+        f"/carts/{cart_id}/gift-cards",
+        json={"gift_card_id": gift_card_id},
+    )
+    assert applied.status_code == 200
+    assert applied.json()["gift_card_applied_cents"] == 700
+    assert applied.json()["amount_due_cents"] == 200
+
+    order = client.post(f"/carts/{cart_id}/checkout")
+    assert order.status_code == 200
+    assert order.json()["total_cents"] == 900
+    assert order.json()["gift_card_applied_cents"] == 700
+    assert order.json()["amount_due_cents"] == 200
+    assert client.get(f"/gift-cards/{gift_card_id}").json()["balance_cents"] == 0
+    another_cart_id = client.post("/carts").json()["cart_id"]
+    response = client.post(
+        f"/carts/{another_cart_id}/gift-cards",
+        json={"gift_card_id": gift_card_id},
+    )
+    assert response.status_code == 409
+
+
+def test_gift_card_balance_caps_at_checkout_total_and_can_be_removed() -> None:
+    gift_card = client.post(
+        "/gift-cards", json={"balance_cents": 5000}
+    ).json()
+    cart_id = client.post("/carts").json()["cart_id"]
+    client.post(
+        f"/carts/{cart_id}/items",
+        json={"product_id": "coffee", "quantity": 2},
+    )
+    client.post(
+        f"/carts/{cart_id}/gift-cards",
+        json={"gift_card_id": gift_card["gift_card_id"]},
+    )
+
+    removed = client.delete(f"/carts/{cart_id}/gift-card")
+    assert removed.status_code == 200
+    assert removed.json()["gift_card_id"] is None
+    assert removed.json()["amount_due_cents"] == 1000
+    assert client.get(
+        f"/gift-cards/{gift_card['gift_card_id']}"
+    ).json()["balance_cents"] == 5000
+
+    client.post(
+        f"/carts/{cart_id}/gift-cards",
+        json={"gift_card_id": gift_card["gift_card_id"]},
+    )
+    order = client.post(f"/carts/{cart_id}/checkout")
+    assert order.json()["gift_card_applied_cents"] == 1000
+    assert order.json()["amount_due_cents"] == 0
+    assert client.get(
+        f"/gift-cards/{gift_card['gift_card_id']}"
+    ).json()["balance_cents"] == 4000
+
+
+def test_failed_checkout_does_not_redeem_gift_card() -> None:
+    gift_card = client.post(
+        "/gift-cards", json={"balance_cents": 1000}
+    ).json()
+    cart_id = client.post("/carts").json()["cart_id"]
+    other_cart_id = client.post("/carts").json()["cart_id"]
+    client.post(
+        f"/carts/{cart_id}/items",
+        json={"product_id": "coffee", "quantity": 2},
+    )
+    client.post(
+        f"/carts/{cart_id}/gift-cards",
+        json={"gift_card_id": gift_card["gift_card_id"]},
+    )
+    client.post(
+        f"/carts/{other_cart_id}/items",
+        json={"product_id": "coffee", "quantity": 9},
+    )
+    assert client.post(f"/carts/{other_cart_id}/checkout").status_code == 200
+
+    assert client.post(f"/carts/{cart_id}/checkout").status_code == 409
+    assert client.get(
+        f"/gift-cards/{gift_card['gift_card_id']}"
+    ).json()["balance_cents"] == 1000
+
+
+def test_gift_card_endpoints_reject_invalid_values_and_unknown_cards() -> None:
+    assert client.post("/gift-cards", json={"balance_cents": 0}).status_code == 422
+    assert client.get(f"/gift-cards/{'0' * 36}").status_code == 404
+
+
 def test_cart_rejects_unknown_discounts_and_insufficient_stock() -> None:
     cart_id = client.post("/carts").json()["cart_id"]
 
@@ -209,6 +315,14 @@ def test_grpc_commands_use_the_same_cart_and_stock(
                 ApplyDiscountRequest(cart_id=cart_id, code="SAVE10"), timeout=2
             )
             assert discounted.total_cents == 900
+            gift_card = http_client.post(
+                "/gift-cards", json={"balance_cents": 400}
+            ).json()
+            applied_card = http_client.post(
+                f"/carts/{cart_id}/gift-cards",
+                json={"gift_card_id": gift_card["gift_card_id"]},
+            )
+            assert applied_card.json()["amount_due_cents"] == 500
             assert (
                 stub.CheckStock(CheckStockRequest(product_id="coffee"), timeout=2)
                 .available_quantity
@@ -217,6 +331,14 @@ def test_grpc_commands_use_the_same_cart_and_stock(
 
             order = stub.CheckoutCart(CartRequest(cart_id=cart_id), timeout=2)
             assert order.total_cents == 900
+            assert order.gift_card_applied_cents == 400
+            assert order.amount_due_cents == 500
+            assert (
+                http_client.get(
+                    f"/gift-cards/{gift_card['gift_card_id']}"
+                ).json()["balance_cents"]
+                == 0
+            )
             assert (
                 stub.CheckStock(CheckStockRequest(product_id="coffee"), timeout=2)
                 .available_quantity

@@ -16,6 +16,8 @@ from commerce import (
     Checkout,
     CommerceError,
     EmptyCartError,
+    GiftCardBalanceError,
+    InvalidGiftCardError,
     InvalidDiscountError,
     NotFoundError,
     OutOfStockError,
@@ -98,13 +100,31 @@ class DiscountRequest(BaseModel):
     code: str = Field(min_length=1)
 
 
+class CreateGiftCardRequest(BaseModel):
+    balance_cents: int = Field(gt=0, le=100_000_000)
+
+
+class ApplyGiftCardRequest(BaseModel):
+    gift_card_id: str = Field(min_length=36, max_length=36)
+
+
 class CartResponse(BaseModel):
     cart_id: str
     items: list[CartItemResponse]
     discount_code: str | None
+    gift_card_id: str | None
+    gift_card_balance_cents: int
     subtotal_cents: int
     discount_cents: int
     total_cents: int
+    gift_card_applied_cents: int
+    amount_due_cents: int
+
+
+class GiftCardResponse(BaseModel):
+    gift_card_id: str
+    balance_cents: int
+    currency: str
 
 
 class CheckoutResponse(BaseModel):
@@ -116,6 +136,9 @@ class CheckoutResponse(BaseModel):
     discount_code: str | None = None
     discount_cents: int = 0
     total_cents: int
+    gift_card_id: str | None
+    gift_card_applied_cents: int
+    amount_due_cents: int
 
 
 class StockResponse(BaseModel):
@@ -140,6 +163,10 @@ def _raise_http_error(error: CommerceError) -> NoReturn:
         raise HTTPException(status_code=404, detail=str(error)) from error
     if isinstance(error, InvalidDiscountError):
         raise HTTPException(status_code=400, detail=str(error)) from error
+    if isinstance(error, InvalidGiftCardError):
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    if isinstance(error, GiftCardBalanceError):
+        raise HTTPException(status_code=409, detail=str(error)) from error
     if isinstance(error, EmptyCartError):
         raise HTTPException(status_code=409, detail=str(error)) from error
     if isinstance(error, OutOfStockError):
@@ -191,6 +218,19 @@ def create_cart() -> CartResponse:
     return _to_cart_response(commerce.create_cart())
 
 
+@app.post("/gift-cards", response_model=GiftCardResponse, status_code=201)
+def create_gift_card(request: CreateGiftCardRequest) -> GiftCardResponse:
+    return GiftCardResponse(**asdict(commerce.create_gift_card(request.balance_cents)))
+
+
+@app.get("/gift-cards/{gift_card_id}", response_model=GiftCardResponse)
+def get_gift_card(gift_card_id: str) -> GiftCardResponse:
+    try:
+        return GiftCardResponse(**asdict(commerce.get_gift_card(gift_card_id)))
+    except CommerceError as error:
+        _raise_http_error(error)
+
+
 @app.get("/carts/{cart_id}", response_model=CartResponse)
 def get_cart(cart_id: str) -> CartResponse:
     try:
@@ -229,6 +269,26 @@ def clear_cart(cart_id: str) -> CartResponse:
 def apply_discount(cart_id: str, request: DiscountRequest) -> CartResponse:
     try:
         return _to_cart_response(commerce.apply_discount(cart_id, request.code))
+    except CommerceError as error:
+        _raise_http_error(error)
+
+
+@app.post("/carts/{cart_id}/gift-cards", response_model=CartResponse)
+def apply_gift_card(
+    cart_id: str, request: ApplyGiftCardRequest
+) -> CartResponse:
+    try:
+        return _to_cart_response(
+            commerce.apply_gift_card(cart_id, request.gift_card_id)
+        )
+    except CommerceError as error:
+        _raise_http_error(error)
+
+
+@app.delete("/carts/{cart_id}/gift-card", response_model=CartResponse)
+def remove_gift_card(cart_id: str) -> CartResponse:
+    try:
+        return _to_cart_response(commerce.remove_gift_card(cart_id))
     except CommerceError as error:
         _raise_http_error(error)
 

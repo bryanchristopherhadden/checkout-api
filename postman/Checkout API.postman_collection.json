@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "bc4b293f-cc4f-4f37-94f1-014eeb0c815b",
     "name": "Checkout API",
-    "description": "HTTP requests for the in-memory checkout service. Start the API locally before sending requests. The Create cart request saves its cart ID for later requests.",
+    "description": "HTTP requests for the PostgreSQL-backed checkout service. Start the API locally before sending requests. The Create cart and Create gift card requests save their IDs for later requests.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -12,6 +12,10 @@
     },
     {
       "key": "cartId",
+      "value": ""
+    },
+    {
+      "key": "giftCardId",
       "value": ""
     }
   ],
@@ -98,6 +102,73 @@
       }
     },
     {
+      "name": "Create $5 gift card",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Gift card created', function () {",
+              "    pm.response.to.have.status(201);",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.gift_card_id).to.be.a('string');",
+              "    pm.collectionVariables.set('giftCardId', body.gift_card_id);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"balance_cents\": 500\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/gift-cards"
+      }
+    },
+    {
+      "name": "Apply gift card to cart",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"gift_card_id\": \"{{giftCardId}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{baseUrl}}/carts/{{cartId}}/gift-cards"
+      }
+    },
+    {
+      "name": "Check gift card balance",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/gift-cards/{{giftCardId}}"
+      }
+    },
+    {
       "name": "View cart",
       "request": {
         "method": "GET",
@@ -133,6 +204,13 @@
           "request": {
             "method": "DELETE",
             "url": "{{baseUrl}}/carts/{{cartId}}"
+          }
+        },
+        {
+          "name": "Remove gift card from cart",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/carts/{{cartId}}/gift-card"
           }
         }
       ]
