@@ -53,6 +53,10 @@ message CartResponse {
   int32 subtotal_cents = 4;
   int32 discount_cents = 5;
   int32 total_cents = 6;
+  string gift_card_id = 7;
+  int32 gift_card_balance_cents = 8;
+  int32 gift_card_applied_cents = 9;
+  int32 amount_due_cents = 10;
 }
 
 message CheckoutResponse {
@@ -64,6 +68,9 @@ message CheckoutResponse {
   string discount_code = 6;
   int32 discount_cents = 7;
   int32 total_cents = 8;
+  string gift_card_id = 9;
+  int32 gift_card_applied_cents = 10;
+  int32 amount_due_cents = 11;
 }
 
 message CheckStockResponse {

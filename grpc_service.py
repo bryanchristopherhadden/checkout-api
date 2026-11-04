@@ -11,6 +11,8 @@ from commerce import (
     Checkout,
     CommerceService,
     EmptyCartError,
+    GiftCardBalanceError,
+    InvalidGiftCardError,
     InvalidDiscountError,
     NotFoundError,
     OutOfStockError,
@@ -25,6 +27,8 @@ def _set_error(context: grpc.ServicerContext, error: Exception) -> NoReturn:
     if isinstance(error, EmptyCartError):
         context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(error))
     if isinstance(error, OutOfStockError):
+        context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(error))
+    if isinstance(error, (InvalidGiftCardError, GiftCardBalanceError)):
         context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(error))
     raise error
 
@@ -44,9 +48,13 @@ def _cart_message(cart: Cart) -> checkout_pb2.CartResponse:
         cart_id=cart.cart_id,
         items=[_line_message(line) for line in cart.items],
         discount_code=cart.discount_code or "",
+        gift_card_id=cart.gift_card_id or "",
+        gift_card_balance_cents=cart.gift_card_balance_cents,
         subtotal_cents=cart.subtotal_cents,
         discount_cents=cart.discount_cents,
         total_cents=cart.total_cents,
+        gift_card_applied_cents=cart.gift_card_applied_cents,
+        amount_due_cents=cart.amount_due_cents,
     )
 
 
@@ -60,6 +68,9 @@ def _checkout_message(order: Checkout) -> checkout_pb2.CheckoutResponse:
         discount_code=order.discount_code or "",
         discount_cents=order.discount_cents,
         total_cents=order.total_cents,
+        gift_card_id=order.gift_card_id or "",
+        gift_card_applied_cents=order.gift_card_applied_cents,
+        amount_due_cents=order.amount_due_cents,
     )
 
 
@@ -123,7 +134,13 @@ class CheckoutCommandServicer(checkout_pb2_grpc.CheckoutCommandsServicer):
     ) -> checkout_pb2.CheckoutResponse:
         try:
             return _checkout_message(self.service.checkout_cart(request.cart_id))
-        except (NotFoundError, EmptyCartError, OutOfStockError) as error:
+        except (
+            NotFoundError,
+            EmptyCartError,
+            OutOfStockError,
+            InvalidGiftCardError,
+            GiftCardBalanceError,
+        ) as error:
             _set_error(context, error)
 
     def CheckStock(

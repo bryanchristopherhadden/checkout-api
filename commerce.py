@@ -11,6 +11,7 @@ from database import (
     carts,
     create_database_engine,
     create_session_factory,
+    gift_cards,
     metadata,
     order_items,
     orders,
@@ -39,9 +40,20 @@ class Cart:
     cart_id: str
     items: list[CartLine]
     discount_code: str | None
+    gift_card_id: str | None
+    gift_card_balance_cents: int
     subtotal_cents: int
     discount_cents: int
     total_cents: int
+    gift_card_applied_cents: int
+    amount_due_cents: int
+
+
+@dataclass(frozen=True)
+class GiftCard:
+    gift_card_id: str
+    balance_cents: int
+    currency: str
 
 
 @dataclass(frozen=True)
@@ -54,6 +66,9 @@ class Checkout:
     discount_code: str | None
     discount_cents: int
     total_cents: int
+    gift_card_id: str | None
+    gift_card_applied_cents: int
+    amount_due_cents: int
 
 
 class CommerceError(Exception):
@@ -65,6 +80,14 @@ class NotFoundError(CommerceError):
 
 
 class InvalidDiscountError(CommerceError):
+    pass
+
+
+class InvalidGiftCardError(CommerceError):
+    pass
+
+
+class GiftCardBalanceError(CommerceError):
     pass
 
 
@@ -141,6 +164,48 @@ class CommerceService:
             session.execute(insert(carts).values(cart_id=cart_id))
         return self.get_cart(cart_id)
 
+    def create_gift_card(self, balance_cents: int) -> GiftCard:
+        gift_card_id = str(uuid4())
+        with self._sessions.begin() as session:
+            session.execute(
+                insert(gift_cards).values(
+                    gift_card_id=gift_card_id,
+                    balance_cents=balance_cents,
+                    currency="USD",
+                )
+            )
+        return GiftCard(gift_card_id, balance_cents, "USD")
+
+    def get_gift_card(self, gift_card_id: str) -> GiftCard:
+        with self._sessions() as session:
+            row = self._get_gift_card(session, gift_card_id)
+            return GiftCard(row.gift_card_id, row.balance_cents, row.currency)
+
+    def apply_gift_card(self, cart_id: str, gift_card_id: str) -> Cart:
+        with self._sessions.begin() as session:
+            self._get_cart(session, cart_id, lock=True)
+            gift_card = self._get_gift_card(session, gift_card_id, lock=True)
+            if gift_card.currency != "USD":
+                raise InvalidGiftCardError("Gift card currency must be USD")
+            if gift_card.balance_cents <= 0:
+                raise GiftCardBalanceError("Gift card has no remaining balance")
+            session.execute(
+                update(carts)
+                .where(carts.c.cart_id == cart_id)
+                .values(gift_card_id=gift_card_id)
+            )
+        return self.get_cart(cart_id)
+
+    def remove_gift_card(self, cart_id: str) -> Cart:
+        with self._sessions.begin() as session:
+            self._get_cart(session, cart_id, lock=True)
+            session.execute(
+                update(carts)
+                .where(carts.c.cart_id == cart_id)
+                .values(gift_card_id=None)
+            )
+        return self.get_cart(cart_id)
+
     def get_cart(self, cart_id: str) -> Cart:
         with self._sessions() as session:
             row = session.execute(
@@ -203,7 +268,7 @@ class CommerceService:
             session.execute(
                 update(carts)
                 .where(carts.c.cart_id == cart_id)
-                .values(discount_code=None)
+                .values(discount_code=None, gift_card_id=None)
             )
         return self.get_cart(cart_id)
 
@@ -258,6 +323,29 @@ class CommerceService:
                 else 0
             )
             total = subtotal - discount
+            gift_card_id = cart.gift_card_id
+            gift_card_applied = 0
+            if gift_card_id is not None:
+                gift_card = self._get_gift_card(session, gift_card_id, lock=True)
+                gift_card_applied = min(gift_card.balance_cents, total)
+                if gift_card_applied:
+                    result = session.execute(
+                        update(gift_cards)
+                        .where(
+                            gift_cards.c.gift_card_id == gift_card_id,
+                            gift_cards.c.balance_cents >= gift_card_applied,
+                            gift_cards.c.currency == "USD",
+                        )
+                        .values(
+                            balance_cents=gift_cards.c.balance_cents
+                            - gift_card_applied
+                        )
+                    )
+                    if result.rowcount != 1:
+                        raise GiftCardBalanceError(
+                            "Gift card balance changed; retry checkout"
+                        )
+            amount_due = total - gift_card_applied
             session.execute(
                 insert(orders).values(
                     order_id=order_id,
@@ -267,6 +355,9 @@ class CommerceService:
                     discount_code=discount_code,
                     discount_cents=discount,
                     total_cents=total,
+                    gift_card_id=gift_card_id,
+                    gift_card_applied_cents=gift_card_applied,
+                    amount_due_cents=amount_due,
                 )
             )
             session.execute(
@@ -287,7 +378,7 @@ class CommerceService:
             session.execute(
                 update(carts)
                 .where(carts.c.cart_id == cart_id)
-                .values(discount_code=None)
+                .values(discount_code=None, gift_card_id=None)
             )
 
         return Checkout(
@@ -299,6 +390,9 @@ class CommerceService:
             discount_code=discount_code,
             discount_cents=discount,
             total_cents=total,
+            gift_card_id=gift_card_id,
+            gift_card_applied_cents=gift_card_applied,
+            amount_due_cents=amount_due,
         )
 
     def checkout_items(self, items: list[tuple[str, int]]) -> Checkout:
@@ -317,6 +411,7 @@ class CommerceService:
         with self._sessions.begin() as session:
             session.execute(delete(orders))
             session.execute(delete(carts))
+            session.execute(delete(gift_cards))
             for product_id, quantity in self._initial_stock.items():
                 session.execute(
                     update(products)
@@ -332,13 +427,20 @@ class CommerceService:
             if cart.discount_code
             else 0
         )
+        gift_card_balance = self._gift_card_balance(session, cart.gift_card_id)
+        total = subtotal - discount
+        gift_card_applied = min(gift_card_balance, total)
         return Cart(
             cart_id=cart.cart_id,
             items=lines,
             discount_code=cart.discount_code,
+            gift_card_id=cart.gift_card_id,
+            gift_card_balance_cents=gift_card_balance,
             subtotal_cents=subtotal,
             discount_cents=discount,
-            total_cents=subtotal - discount,
+            total_cents=total,
+            gift_card_applied_cents=gift_card_applied,
+            amount_due_cents=total - gift_card_applied,
         )
 
     @staticmethod
@@ -392,6 +494,29 @@ class CommerceService:
         if product is None:
             raise NotFoundError(f"Unknown product: {product_id}")
         return product
+
+    @staticmethod
+    def _get_gift_card(
+        session: Session, gift_card_id: str, lock: bool = False
+    ) -> Row[Any]:
+        query = select(gift_cards).where(gift_cards.c.gift_card_id == gift_card_id)
+        if lock:
+            query = query.with_for_update()
+        gift_card = session.execute(query).first()
+        if gift_card is None:
+            raise NotFoundError(f"Unknown gift card: {gift_card_id}")
+        return gift_card
+
+    @staticmethod
+    def _gift_card_balance(session: Session, gift_card_id: str | None) -> int:
+        if gift_card_id is None:
+            return 0
+        balance = session.scalar(
+            select(gift_cards.c.balance_cents).where(
+                gift_cards.c.gift_card_id == gift_card_id
+            )
+        )
+        return balance if balance is not None else 0
 
 
 commerce = CommerceService()

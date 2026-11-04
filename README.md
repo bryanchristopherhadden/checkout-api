@@ -79,9 +79,9 @@ starts gRPC on port `50051`. Set `CHECKOUT_GRPC_PORT` to choose another port.
 
 Import [`postman/Checkout API.postman_collection.json`](./postman/Checkout%20API.postman_collection.json)
 in Postman using **Import → File**. With the API running, send requests in
-order from **Create cart** through **Checkout cart**. The create request saves
-the new cart ID to the collection variable automatically. The collection's
-`baseUrl` variable defaults to `http://127.0.0.1:8000`.
+order from **Create cart** through **Checkout cart**. The create-cart and
+create-gift-card requests save their IDs to collection variables automatically.
+The collection's `baseUrl` variable defaults to `http://127.0.0.1:8000`.
 
 Generate the Python gRPC bindings after changing `checkout.proto`:
 
@@ -104,8 +104,15 @@ python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. checkout.prot
 - `DELETE /carts/{cart_id}` clears the cart.
 - `POST /carts/{cart_id}/discounts` accepts `{"code":"SAVE10"}` or
   `{"code":"SAVE20"}`.
+- `POST /gift-cards` creates a USD gift card from
+  `{"balance_cents":1000}` and returns its card ID.
+- `GET /gift-cards/{gift_card_id}` checks the remaining gift card balance.
+- `POST /carts/{cart_id}/gift-cards` accepts `{"gift_card_id":"..."}` to apply a
+  gift card to a cart; `DELETE /carts/{cart_id}/gift-card` removes it.
 - `POST /carts/{cart_id}/checkout` checks out the cart, applies its discount,
-  and decrements inventory.
+  redeems up to the discounted total from the applied gift card, and decrements
+  inventory. The response includes `gift_card_applied_cents` and
+  `amount_due_cents`; no external payment is processed.
 - `POST /checkout` retains the original stateless checkout request format.
 
 ## gRPC commands
@@ -127,3 +134,7 @@ provider and adding its deployment settings and secrets.
 
 Run the tests with `pytest`. Tests use isolated SQLite databases; the
 application itself defaults to PostgreSQL using `DATABASE_URL`.
+
+Gift-card issuance is unauthenticated in this demo. Secure issuance and
+redemption with authentication and authorization before using a similar design
+in a public production service.
