@@ -75,6 +75,31 @@ The API is available at `http://127.0.0.1:8000`; open
 `http://127.0.0.1:8000/docs` for interactive API documentation. The API also
 starts gRPC on port `50051`. Set `CHECKOUT_GRPC_PORT` to choose another port.
 
+## Docker and Kubernetes
+
+The API also runs as a container image and as a Helm chart on a local
+minikube cluster:
+
+- [`Dockerfile`](./Dockerfile) builds a non-root image that serves HTTP on port
+  `8000` and gRPC on port `50051`. Migrations are not run by the container.
+- [`charts/checkout-api/`](./charts/checkout-api) is a Helm chart with the API
+  Deployment and Service, a PostgreSQL 17 Deployment for local clusters, a
+  database Secret, and a post-install/post-upgrade migration Job.
+- [`values/minikube.yaml`](./values/minikube.yaml) holds the local overrides.
+
+For step-by-step commands to run the API with Docker Compose, as a container,
+and on minikube, and to test each one, see
+[`docs/RUNBOOK.md`](./docs/RUNBOOK.md). That file also covers troubleshooting
+for the problems we hit during setup.
+
+Quick check after the cluster is up:
+
+```sh
+helm install checkout charts/checkout-api -f values/minikube.yaml --wait
+kubectl port-forward svc/checkout-checkout-api 18000:8000
+curl http://127.0.0.1:18000/health
+```
+
 ## Postman
 
 Import [`postman/Checkout API.postman_collection.json`](./postman/Checkout%20API.postman_collection.json)
